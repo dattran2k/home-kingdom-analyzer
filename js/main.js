@@ -4,17 +4,18 @@ import { initializeFilterHandlers, applyFilters } from './modules/filtering.js';
 import { resetSort } from './modules/sorting.js';
 import { 
     selectAllColumns, 
-    selectImportantColumns, 
+    clearAllColumns,
     createSheetUI, 
     updateURLWithConfig,
-    loadConfigFromURL,
-    applyPendingSelection
+    loadConfigFromURL
 } from './modules/ui.js';
+import { columnMapper } from './modules/mapping/columnMapper.js';
 import { chartToggle } from './components/ChartToggle.js';
-import { loadGoogleSheetAsCSV, loadMultipleSheets as loadMultipleSheetsAsync } from './modules/sheets/googleSheetsLoader.js';
+import { loadMultipleSheets as loadMultipleSheetsAsync } from './modules/sheets/googleSheetsLoader.js';
 import { sheetManager } from './modules/sheets/sheetManager.js';
 import { chartManager } from './modules/charts/chartManager.js';
-import { appState, resetState } from './modules/state.js';
+import { chartContainer } from './modules/charts/components/ConfigurableCharts/index.js';
+import { appState, resetState, updateState } from './modules/state.js';
 
 // Add a new URL input row - define globally at the start
 function addSheetUrlRow() {
@@ -95,6 +96,18 @@ async function loadAllSheets(fromURL = false) {
                 changeIds.forEach(id => {
                     sheetManager.toggleChangeSelection(id);
                 });
+                
+                // If we have mapping in the URL and there's only one change id,
+                // initialize column mapping UI
+                if (urlParams.get('mapping') && changeIds.length === 1) {
+                    const [sheet1Id, sheet2Id] = changeIds[0].split('-');
+                    const sheet1 = sheetManager.sheets.find(s => s.id === sheet1Id);
+                    const sheet2 = sheetManager.sheets.find(s => s.id === sheet2Id);
+                    
+                    if (sheet1 && sheet2) {
+                        columnMapper.initializeMappingUI(sheet1, sheet2);
+                    }
+                }
             } else if (selectedSheet) {
                 // Handle sheet selection
                 console.log('Selecting sheet from URL:', selectedSheet);
@@ -137,8 +150,65 @@ async function loadAllSheets(fromURL = false) {
             if (columns) {
                 const selectedColumns = columns.split(',');
                 document.querySelectorAll('#columnsFilter input[type="checkbox"]').forEach(cb => {
-                    cb.checked = selectedColumns.includes(cb.value);
+                    const isSelected = selectedColumns.includes(cb.value);
+                    cb.checked = isSelected;
+                    
+                    // Update chip UI
+                    const chip = cb.closest('.column-chip');
+                    const checkmark = chip?.querySelector('.checkmark');
+                    
+                    if (chip) {
+                        if (isSelected) {
+                            chip.classList.add('selected');
+                            if (checkmark) checkmark.style.display = '';
+                        } else {
+                            chip.classList.remove('selected');
+                            if (checkmark) checkmark.style.display = 'none';
+                        }
+                    }
                 });
+            }
+            
+            // Apply column order from URL
+            const columnOrder = urlParams.get('column_order');
+            if (columnOrder) {
+                const orderedColumns = columnOrder.split(',');
+                appState.columnOrder = orderedColumns;
+                
+                // Reorder the chips based on the column order
+                const columnsFilter = document.getElementById('columnsFilter');
+                if (columnsFilter) {
+                    const chips = Array.from(columnsFilter.querySelectorAll('.column-chip'));
+                    
+                    // Sort chips based on the column order
+                    chips.sort((a, b) => {
+                        const aIndex = orderedColumns.indexOf(a.dataset.value);
+                        const bIndex = orderedColumns.indexOf(b.dataset.value);
+                        
+                        // If both values are in the ordered columns, sort by their index
+                        if (aIndex !== -1 && bIndex !== -1) {
+                            return aIndex - bIndex;
+                        }
+                        
+                        // If only one value is in the ordered columns, prioritize it
+                        if (aIndex !== -1) return -1;
+                        if (bIndex !== -1) return 1;
+                        
+                        // If neither is in the ordered columns, keep the original order
+                        return 0;
+                    });
+                    
+                    // Re-append chips in the correct order
+                    chips.forEach(chip => columnsFilter.appendChild(chip));
+                    
+                    // Update appState.currentColumns to match the new order
+                    appState.currentColumns = chips
+                        .filter(chip => {
+                            const checkbox = chip.querySelector('input[type="checkbox"]');
+                            return checkbox && checkbox.checked;
+                        })
+                        .map(chip => chip.dataset.value);
+                }
             }
             
             // Apply filters
@@ -268,17 +338,12 @@ async function initializeApp() {
     // Expose functions to window immediately for HTML event handlers
     window.applyFilters = applyFilters;
     window.selectAllColumns = selectAllColumns;
-    window.selectImportantColumns = selectImportantColumns;
+    window.clearAllColumns = clearAllColumns;
     window.resetSort = resetSort;
     window.loadRepoFile = loadRepoFile;
     window.loadAllSheets = loadAllSheets;
     window.shareLink = shareLink;
-    
-    // Remove comparison functions as requested
-    window.toggleCompareMode = () => console.log('Compare mode removed');
-    window.applyCompare = () => console.log('Compare mode removed');
-    window.clearCompare = () => console.log('Compare mode removed');
-    window.setDefaultCompare = () => console.log('Compare mode removed');
+    window.columnMapper = columnMapper;
     
     // Initialize data source handlers
     initializeDataSourceHandlers();
@@ -286,8 +351,18 @@ async function initializeApp() {
     // Initialize file handlers
     initializeFileHandlers();
     
-    // Initialize chart
+    // Initialize charts
     chartManager.initializeChart();
+    chartContainer.initialize();
+    window.chartContainer = chartContainer;
+    
+    // Add chart controls to UI
+    const addChartControls = document.querySelector('.chart-controls');
+    if (!addChartControls) {
+        import('./modules/ui.js').then(ui => {
+            ui.addChartControls();
+        });
+    }
     
     // Auto-load sheets from URL if present
     await autoLoadSheetsFromURL();
@@ -298,6 +373,31 @@ async function initializeApp() {
             e.target.id === 'kingdomFilter') {
             updateURLWithConfig();
         }
+    });
+    
+// Update all chart components when data changes
+    const originalUpdateState = updateState;
+    window.updateState = function(updates) {
+        // Call original to update the appState
+        originalUpdateState(updates);
+        
+        // Update charts with new data if data field is updated
+        if (updates.data) {
+            // Update original chart manager
+            if (window.chartManager) {
+                chartManager.updateChart();
+            }
+            
+            // Update configurable charts
+            if (window.chartContainer) {
+                chartContainer.setData(updates.data);
+            }
+        }
+    };
+    
+    // Update other modules to use the window version of updateState
+    import('./modules/state.js').then(stateModule => {
+        stateModule.setUpdateStateFunction(window.updateState);
     });
     
     document.getElementById('searchInput')?.addEventListener('input', updateURLWithConfig);

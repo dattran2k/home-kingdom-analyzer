@@ -1,0 +1,156 @@
+/**
+ * Styles for column mapping UI
+ */
+
+.column-mapping-container {
+    background: #2c3e50;
+    border-radius: 8px;
+    padding: 20px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+}
+
+.mapping-header {
+    margin-bottom: 15px;
+}
+
+.mapping-header h3 {
+    margin: 0 0 5px 0;
+    color: #ecf0f1;
+    font-size: 1.4em;
+}
+
+.mapping-header p {
+    margin: 0;
+    color: #95a5a6;
+    font-size: 0.9em;
+}
+
+.mapping-controls {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+}
+
+.mapping-pairs {
+    background: #34495e;
+    border-radius: 6px;
+    padding: 20px;
+    margin-top: 15px;
+}
+
+.sheets-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 20px;
+}
+
+.sheet-info {
+    flex: 1;
+    padding: 10px;
+    background: #2c3e50;
+    border-radius: 4px;
+    color: #3498db;
+    font-weight: bold;
+    text-align: center;
+    margin: 0 10px;
+}
+
+.mapping-section {
+    margin-bottom: 25px;
+    border-bottom: 1px solid #2c3e50;
+    padding-bottom: 15px;
+}
+
+.mapping-section h4 {
+    color: #ecf0f1;
+    margin: 0 0 5px 0;
+}
+
+.mapping-description {
+    color: #95a5a6;
+    font-size: 0.9em;
+    margin: 0 0 15px 0;
+}
+
+.mapping-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 15px;
+    transition: all 0.3s ease;
+}
+
+.key-mapping-row {
+    background: rgba(52, 152, 219, 0.1);
+    padding: 10px;
+    border-radius: 6px;
+}
+
+.col-select {
+    flex: 1;
+}
+
+.map-arrow {
+    margin: 0 15px;
+    color: #7f8c8d;
+    font-size: 1.5em;
+}
+
+.mapping-select {
+    width: 100%;
+    padding: 8px;
+    background: #2c3e50;
+    color: #ecf0f1;
+    border: 1px solid #3498db;
+    border-radius: 4px;
+}
+
+.id-column-option {
+    color: #f39c12; /* Highlight ID columns */
+}
+
+.mapping-row-action {
+    margin-left: 10px;
+}
+
+.mapping-row-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.mapping-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 20px;
+}
+
+.remove-mapping-btn {
+    background: none;
+    border: none;
+    color: #e74c3c;
+    font-size: 1.2em;
+    cursor: pointer;
+    padding: 5px;
+}
+
+.remove-mapping-btn:hover {
+    color: #c0392b;
+}
+
+/* Additional responsive styles */
+@media (max-width: 768px) {
+    .sheets-info,
+    .mapping-row {
+        flex-direction: column;
+        gap: 10px;
+    }
+    
+    .sheet-info {
+        margin: 5px 0;
+    }
+    
+    .map-arrow {
+        transform: rotate(90deg);
+    }
+}

@@ -132,11 +132,7 @@ export function generateStatsHTML(stats, averages) {
         { pattern: 'defeat', label: 'Defeats', exact: false }
     ];
     
-    // Show stats that have data
-    let statCount = 1; // Start with 1 for Total Players
-    const MAX_VISIBLE_STATS = 10;
-    let additionalStats = [];
-    
+    // Show all stats that have data
     priorityStats.forEach(stat => {
         const column = Object.keys(stats.totals).find(col => 
             new RegExp(stat.pattern, 'i').test(col)
@@ -146,7 +142,7 @@ export function generateStatsHTML(stats, averages) {
             const total = stats.totals[column];
             const average = averages[column] || 0;
             
-            const statHtml = `
+            html += `
                 <div class="stat-card">
                     <div class="stat-value">${formatNumberShort(total)}</div>
                     <div class="stat-label">Total ${stat.label}</div>
@@ -156,28 +152,47 @@ export function generateStatsHTML(stats, averages) {
                     </div>
                 </div>
             `;
-            
-            if (statCount < MAX_VISIBLE_STATS) {
-                html += statHtml;
-                statCount++;
-            } else {
-                additionalStats.push(statHtml);
-            }
         }
     });
     
-    // Add expand/collapse button if there are more stats
-    if (additionalStats.length > 0) {
+    // Find additional columns that might have valid stats, but don't match any priority pattern
+    const priorityPatterns = priorityStats.map(stat => stat.pattern);
+    const additionalColumns = Object.keys(stats.totals).filter(col => {
+        // Skip columns that already matched priority patterns
+        if (priorityStats.some(stat => new RegExp(stat.pattern, 'i').test(col))) {
+            return false;
+        }
+        
+        // Include only numeric columns that have non-zero values
+        return stats.totals[col] !== 0 && !isNaN(stats.totals[col]);
+    });
+    
+    // Sort additional columns by total value (descending)
+    additionalColumns.sort((a, b) => stats.totals[b] - stats.totals[a]);
+    
+    // Add these columns to the stats display with automatically generated labels
+    additionalColumns.forEach(column => {
+        const total = stats.totals[column];
+        const average = averages[column] || 0;
+        
+        // Generate a readable label from the column name
+        const label = column
+            .replace(/_/g, ' ')
+            .replace(/([A-Z])/g, ' $1') // Add space before capital letters
+            .replace(/^./, str => str.toUpperCase()) // Capitalize first letter
+            .trim();
+        
         html += `
-            <div class="stat-card expand-stats" onclick="toggleAdditionalStats()">
-                <div class="stat-value">+${additionalStats.length}</div>
-                <div class="stat-label">More Stats</div>
-            </div>
-            <div id="additionalStats" style="display: none; grid-column: 1 / -1;">
-                <div class="stats-grid">${additionalStats.join('')}</div>
+            <div class="stat-card">
+                <div class="stat-value">${formatNumberShort(total)}</div>
+                <div class="stat-label">Total ${label}</div>
+                <div class="stat-avg">
+                    <span class="avg-label">Avg:</span>
+                    <span class="avg-value">${formatNumberShort(average)}</span>
+                </div>
             </div>
         `;
-    }
+    });
     
     return html;
 }
@@ -217,21 +232,10 @@ export function calculateAverages(data) {
     return averages;
 }
 
-// Toggle additional stats visibility
+// This function is no longer needed as all stats are shown by default
+// Keeping an empty implementation for compatibility
 window.toggleAdditionalStats = function() {
-    const additionalStats = document.getElementById('additionalStats');
-    const expandCard = document.querySelector('.expand-stats');
-    
-    if (additionalStats.style.display === 'none') {
-        additionalStats.style.display = 'block';
-        expandCard.querySelector('.stat-value').textContent = '−';
-        expandCard.querySelector('.stat-label').textContent = 'Hide Stats';
-    } else {
-        additionalStats.style.display = 'none';
-        const count = additionalStats.querySelectorAll('.stat-card').length;
-        expandCard.querySelector('.stat-value').textContent = `+${count}`;
-        expandCard.querySelector('.stat-label').textContent = 'More Stats';
-    }
+    // Function left empty for backward compatibility
 };
 
 export function calculateStats(data) {

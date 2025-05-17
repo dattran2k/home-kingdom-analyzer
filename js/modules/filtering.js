@@ -1,5 +1,6 @@
 // Filtering functions
 import { appState } from './state.js';
+import { chartContainer } from './charts/components/ConfigurableCharts/index.js';
 import { applyMultiSort, sortData } from './sorting.js';
 import { updateStats } from './statistics.js';
 import { renderTable } from './tableRenderer.js';
@@ -22,28 +23,56 @@ export function applyFilters(preserveUI = false) {
     
     // If no columns selected, select all available columns
     if (selectedColumns.length === 0 && appState.headers.length > 0) {
-        appState.currentColumns = [...appState.headers];
         // Check all checkboxes
         document.querySelectorAll('#columnsFilter input[type="checkbox"]').forEach(cb => {
             cb.checked = true;
+            
+            // Update chips UI
+            const chip = cb.closest('.column-chip');
+            if (chip) {
+                chip.classList.add('selected');
+                const checkmark = chip.querySelector('.checkmark');
+                if (checkmark) checkmark.style.display = '';
+            }
+            
+            selectedColumns.push(cb.value);
         });
+    }
+    
+    // Preserve the order of columns if we have a custom order defined
+    if (appState.columnOrder && appState.columnOrder.length > 0) {
+        // Filter selected columns to only include those in columnOrder
+        const orderedSelectedColumns = [];
+        
+        // First add columns in the order they appear in columnOrder
+        appState.columnOrder.forEach(col => {
+            if (selectedColumns.includes(col)) {
+                orderedSelectedColumns.push(col);
+            }
+        });
+        
+        // Then add any remaining selected columns not in columnOrder
+        selectedColumns.forEach(col => {
+            if (!orderedSelectedColumns.includes(col)) {
+                orderedSelectedColumns.push(col);
+            }
+        });
+        
+        appState.currentColumns = orderedSelectedColumns;
     } else {
         appState.currentColumns = selectedColumns;
     }
     
     console.log('Current columns after selection:', appState.currentColumns);
     
-    // Find relevant columns dynamically
-    const nameColumn = appState.headers.find(h => 
-        h.toLowerCase().includes('name') && !h.toLowerCase().includes('alliance')
-    );
+    // Find relevant columns dynamically - only needed for kingdom filter
     const kingdomColumn = appState.headers.find(h => 
         h.toLowerCase().includes('kingdom') || 
         h.toLowerCase().includes('server')
     );
-    const powerColumn = appState.headers.find(h => 
-        h.toLowerCase().includes('power') && !h.toLowerCase().includes('highest')
-    );
+    
+    // Check if we're in comparison mode - just keep for your information
+    const isComparisonMode = appState.columnMapping && Object.keys(appState.columnMapping).length > 0;
     
     // Filter data
     appState.data = appState.allData.filter(row => {
@@ -52,13 +81,65 @@ export function applyFilters(preserveUI = false) {
             return false;
         }
         
-        // Name search
-        if (searchTerm && nameColumn && !row[nameColumn].toLowerCase().includes(searchTerm)) {
-            return false;
+        // Search by name or ID
+        if (searchTerm) {
+            // Simple search through all text columns for both comparison and normal mode
+            let matchFound = false;
+            
+            // Search through all columns to find text matches
+            for (const colName of appState.headers) {
+                // Skip null/undefined values
+                if (row[colName] === undefined || row[colName] === null) continue;
+                
+                // Convert to string
+                const valueStr = String(row[colName]);
+                
+                // Check if text contains search term
+                if (valueStr.toLowerCase().includes(searchTerm)) {
+                    matchFound = true;
+                    // Uncomment for debugging if needed
+                    // console.log(`Match found in column: ${colName} = ${valueStr}`);
+                    break; // Found a match, stop searching
+                }
+            }
+            
+            // If no match found in any column, filter out this row
+            if (!matchFound) {
+                return false;
+            }
+            
+            // Highlight search section when search is active
+            const searchSection = document.querySelector('.search-section');
+            if (searchSection) {
+                searchSection.classList.add('active-search');
+                
+                // Add animated background for extra emphasis
+                searchSection.style.backgroundImage = 'linear-gradient(135deg, #3a526d 0%, #2c3e50 50%, #3a526d 100%)';
+                searchSection.style.backgroundSize = '200% 100%';
+                searchSection.style.animation = 'gradientMove 2s ease infinite';
+            }
+        } else {
+            // Remove highlight when search is empty
+            const searchSection = document.querySelector('.search-section');
+            if (searchSection) {
+                searchSection.classList.remove('active-search');
+                searchSection.style.backgroundImage = 'none';
+                searchSection.style.animation = 'none';
+            }
         }
         
         return true;
     });
+    
+    // Update the search results count
+    const searchResultsCount = document.getElementById('searchResultsCount');
+    if (searchResultsCount) {
+        if (searchTerm) {
+            searchResultsCount.textContent = `${appState.data.length} results`;
+        } else {
+            searchResultsCount.textContent = '';
+        }
+    }
     
     // Apply sorting
     if (appState.multiSortMode) {
@@ -72,6 +153,11 @@ export function applyFilters(preserveUI = false) {
     
     // Update table
     renderTable();
+    
+    // Update configurable charts if available
+    if (window.chartContainer) {
+        chartContainer.setData(appState.data);
+    }
 }
 
 function calculatePlayerType(row) {
@@ -104,15 +190,67 @@ export function initializeFilterHandlers(preserveFilters = true) {
     
     // Search input handler
     const searchInput = document.getElementById('searchInput');
+    const clearSearchBtn = document.getElementById('clearSearchBtn');
+    
     if (searchInput) {
         // Only add listener if not already added
         if (!searchInput.dataset.listenerAdded) {
             searchInput.addEventListener('input', () => {
                 clearTimeout(window.searchTimeout);
                 window.searchTimeout = setTimeout(applyFilters, 300);
+                
+                // Show/hide clear button based on input value
+                if (clearSearchBtn) {
+                    clearSearchBtn.style.display = searchInput.value ? 'flex' : 'none';
+                }
             });
             searchInput.dataset.listenerAdded = 'true';
         }
+        
+        // Check initial state
+        if (searchInput.value && clearSearchBtn) {
+            clearSearchBtn.style.display = 'flex';
+            
+            // Also add the active class to search section
+            const searchSection = document.querySelector('.search-section');
+            if (searchSection) {
+                searchSection.classList.add('active-search');
+                searchSection.style.backgroundImage = 'linear-gradient(135deg, #3a526d 0%, #2c3e50 50%, #3a526d 100%)';
+                searchSection.style.backgroundSize = '200% 100%';
+                searchSection.style.animation = 'gradientMove 2s ease infinite';
+            }
+        }
+    }
+    
+    // Clear search button handler
+    if (clearSearchBtn && !clearSearchBtn.dataset.listenerAdded) {
+        clearSearchBtn.addEventListener('click', () => {
+            if (searchInput) {
+                searchInput.value = '';
+                clearSearchBtn.style.display = 'none';
+                
+                // Remove active class from search section
+                const searchSection = document.querySelector('.search-section');
+                if (searchSection) {
+                    searchSection.classList.remove('active-search');
+                    searchSection.style.backgroundImage = 'none';
+                    searchSection.style.animation = 'none';
+                }
+                
+                // Clear search results count
+                const searchResultsCount = document.getElementById('searchResultsCount');
+                if (searchResultsCount) {
+                    searchResultsCount.textContent = '';
+                }
+                
+                // Apply filters to update the table
+                applyFilters();
+                
+                // Focus back on the search input for better UX
+                searchInput.focus();
+            }
+        });
+        clearSearchBtn.dataset.listenerAdded = 'true';
     }
     
     // Apply filters when dropdowns change (immediate)

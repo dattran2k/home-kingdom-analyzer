@@ -4,6 +4,7 @@ import { renderTable } from '../tableRenderer.js';
 import { updateStats } from '../statistics.js';
 import { applyFilters } from '../filtering.js';
 import { updateURLWithConfig, initializeUIElements, formatNumber } from '../ui.js';
+import { columnMapper } from '../mapping/columnMapper.js';
 
 export class SheetManager {
     constructor() {
@@ -57,6 +58,15 @@ export class SheetManager {
         appState.selectedSheet = sheetId;
         appState.selectedChanges = this.selectedChanges;
         
+        // Clear column mapping since we're viewing a single sheet
+        appState.columnMapping = null;
+        
+        // Hide the mapping UI if it exists
+        const mappingContainer = document.getElementById('columnMappingContainer');
+        if (mappingContainer) {
+            mappingContainer.style.display = 'none';
+        }
+        
         this.updateDisplay();
         this.updateUI(); // Update UI to show active state
         updateURLWithConfig();
@@ -71,10 +81,43 @@ export class SheetManager {
         
         if (this.selectedChanges.has(changeId)) {
             this.selectedChanges.delete(changeId);
+            // Hide the mapping UI if no changes are selected
+            if (this.selectedChanges.size === 0) {
+                columnMapper.hideMappingUI();
+            }
         } else {
             // Clear other changes and select only this one
             this.selectedChanges.clear();
             this.selectedChanges.add(changeId);
+            
+            // Initialize column mapping UI for the selected change
+            const [sheet1Id, sheet2Id] = changeId.split('-');
+            const sheet1 = this.sheets.find(s => s.id === sheet1Id);
+            const sheet2 = this.sheets.find(s => s.id === sheet2Id);
+            
+            if (sheet1 && sheet2) {
+                // Check if sheets have identical column structures
+                const identicalStructure = this.sheetsHaveIdenticalColumns(sheet1, sheet2);
+                
+                if (identicalStructure) {
+                    console.log('Sheets have identical column structures. Mapping UI will be simplified.');
+                    
+                    // Show a message to the user
+                    const statusDiv = document.getElementById('loadingStatus');
+                    if (statusDiv) {
+                        statusDiv.textContent = 'Sheets have identical column structures! Automatic comparison is ready.';
+                        statusDiv.style.color = '#2ecc71';
+                        
+                        // Clear message after 3 seconds
+                        setTimeout(() => {
+                            statusDiv.textContent = '';
+                        }, 3000);
+                    }
+                }
+                
+                // Initialize column mapping UI
+                columnMapper.initializeMappingUI(sheet1, sheet2);
+            }
         }
         
         appState.selectedChanges = this.selectedChanges;
@@ -82,6 +125,23 @@ export class SheetManager {
         this.updateDisplay();
         this.updateUI(); // Update UI to show active state
         updateURLWithConfig();
+    }
+    
+    // Helper to check if two sheets have identical column structures
+    sheetsHaveIdenticalColumns(sheet1, sheet2) {
+        // Check if headers match exactly
+        if (sheet1.headers.length !== sheet2.headers.length) {
+            return false;
+        }
+        
+        // Check if all headers from sheet1 exist in sheet2
+        for (const header of sheet1.headers) {
+            if (!sheet2.headers.includes(header)) {
+                return false;
+            }
+        }
+        
+        return true;
     }
     
     calculateChanges() {
@@ -99,57 +159,149 @@ export class SheetManager {
         }
     }
     
+    // Method to recalculate changes after column mapping has been updated
+    recalculateChangesWithMapping(changeId) {
+        if (!this.changesBetweenSheets.has(changeId)) return;
+        
+        const [sheet1Id, sheet2Id] = changeId.split('-');
+        const sheet1 = this.sheets.find(s => s.id === sheet1Id);
+        const sheet2 = this.sheets.find(s => s.id === sheet2Id);
+        
+        if (sheet1 && sheet2) {
+            const changes = this.calculateChangesBetweenSheets(sheet1, sheet2);
+            this.changesBetweenSheets.set(changeId, changes);
+            
+            if (this.selectedChanges.has(changeId)) {
+                // If this change is currently selected, update the display
+                this.updateDisplay();
+            }
+        }
+    }
+    
     calculateChangesBetweenSheets(sheet1, sheet2) {
         const changes = new Map();
+        const mappingId = `${sheet1.id}-${sheet2.id}`;
         
-        // Create mapping by governor_id for quick lookup
+        // Check if column mapping exists for these sheets
+        const hasMapping = columnMapper.hasMappingFor(sheet1.id, sheet2.id);
+        console.log(`Using column mapping for ${mappingId}: ${hasMapping}`);
+        
+        // Create mapping by governor_id or equivalent for quick lookup
         const sheet1Map = new Map();
         const sheet2Map = new Map();
         
+        // Use correct ID column for each sheet
+        const sheet1IdColumn = this.getIdColumn(sheet1.headers);
+        let sheet2IdColumn = this.getIdColumn(sheet2.headers);
+        
+        // If we have column mapping, check if ID columns are mapped
+        if (hasMapping) {
+            const mappedIdColumn = columnMapper.getMappedColumn(sheet1.id, sheet2.id, sheet1IdColumn);
+            if (mappedIdColumn && mappedIdColumn !== sheet1IdColumn) {
+                sheet2IdColumn = mappedIdColumn;
+                console.log(`Using mapped ID column: ${sheet1IdColumn} -> ${sheet2IdColumn}`);
+            }
+        }
+        
+        console.log(`Sheet1 ID column: ${sheet1IdColumn}, Sheet2 ID column: ${sheet2IdColumn}`);
+        
+        // Create maps for quick lookups using the correct ID columns
         sheet1.data.forEach(row => {
-            const id = this.getRowId(row);
-            if (id) sheet1Map.set(id, row);
+            const id = row[sheet1IdColumn];
+            if (id) sheet1Map.set(id.toString(), row);
         });
         
         sheet2.data.forEach(row => {
-            const id = this.getRowId(row);
-            if (id) sheet2Map.set(id, row);
+            const id = row[sheet2IdColumn];
+            if (id) sheet2Map.set(id.toString(), row);
         });
         
-        // Process all players from both sheets
-        const allPlayerIds = new Set([...sheet1Map.keys(), ...sheet2Map.keys()]);
+        // Find common IDs between both sheets
+        const sheet1Ids = new Set(sheet1Map.keys());
+        const sheet2Ids = new Set(sheet2Map.keys());
+        const commonIds = [...sheet1Ids].filter(id => sheet2Ids.has(id));
         
-        for (const id of allPlayerIds) {
+        console.log(`Total unique IDs in Sheet1: ${sheet1Ids.size}`);
+        console.log(`Total unique IDs in Sheet2: ${sheet2Ids.size}`);
+        console.log(`Common IDs in both sheets: ${commonIds.length}`);
+        
+        // Process only common IDs - players that exist in both sheets
+        for (const id of commonIds) {
             const row1 = sheet1Map.get(id);
             const row2 = sheet2Map.get(id);
             
-            // Get the most recent data for non-numeric fields
-            const currentRow = row2 || row1;
+            // Skip if either row doesn't exist (shouldn't happen with common IDs)
+            if (!row1 || !row2) continue;
+            
             const changeRow = {};
             
-            // Copy all non-numeric fields from current data
-            const numericColumns = this.getNumericColumns(sheet1.headers);
-            sheet1.headers.forEach(col => {
-                if (!numericColumns.includes(col)) {
-                    changeRow[col] = currentRow[col];
-                }
-            });
+            // Always include the ID column
+            changeRow[sheet1IdColumn] = id;
             
-            // Calculate numeric changes
+            // Copy over name field if it exists
+            const nameColumn = this.getNameColumn(sheet1.headers);
+            if (nameColumn && row1[nameColumn]) {
+                changeRow[nameColumn] = row1[nameColumn];
+            }
+            
+            // Get the numeric columns
+            const numericColumns = this.getNumericColumns(sheet1.headers);
+            
+            // Calculate numeric changes with mapping support
             numericColumns.forEach(col => {
-                const val1 = row1 ? (parseFloat(row1[col]) || 0) : 0;
-                const val2 = row2 ? (parseFloat(row2[col]) || 0) : 0;
-                const diff = val2 - val1;
+                // Get the mapped column name for sheet2
+                const sheet2Col = hasMapping 
+                    ? columnMapper.getMappedColumn(sheet1.id, sheet2.id, col) 
+                    : col;
                 
-                // Debug log for checking values
-                if (diff !== 0 && Math.abs(diff) > 0.001) {
-                    console.log(`Column: ${col}, Val1: ${val1}, Val2: ${val2}, Diff: ${diff}`);
+                // Skip columns that don't have a mapping
+                if (!sheet2Col || !(sheet2Col in row2)) {
+                    return;
                 }
+                
+                // Debug log to check the mapping
+                if (hasMapping && sheet2Col !== col) {
+                    console.log(`Mapped column: ${col} -> ${sheet2Col}`);
+                }
+                
+                // Get values from both sheets using the correct column names
+                let val1 = 0;
+                let val2 = 0;
+                
+                // Ensure we have the rows and the columns exist
+                if (col in row1) {
+                    // Parse numeric value from sheet1, handle formatting with commas
+                    const rawVal1 = row1[col];
+                    if (typeof rawVal1 === 'string') {
+                        // Remove commas and then parse
+                        val1 = parseFloat(rawVal1.replace(/,/g, '')) || 0;
+                    } else {
+                        val1 = parseFloat(rawVal1) || 0;
+                    }
+                }
+                
+                if (sheet2Col in row2) {
+                    // Parse numeric value from sheet2, handle formatting with commas
+                    const rawVal2 = row2[sheet2Col];
+                    if (typeof rawVal2 === 'string') {
+                        // Remove commas and then parse
+                        val2 = parseFloat(rawVal2.replace(/,/g, '')) || 0;
+                    } else {
+                        val2 = parseFloat(rawVal2) || 0;
+                    }
+                }
+                
+                // Log the values for debugging
+                console.log(`ID: ${id}, Column: ${col} -> ${sheet2Col}, Val1: ${val1}, Val2: ${val2}`);
+                
+                // Calculate the actual difference
+                const diff = val2 - val1;
                 
                 // Format with + or - sign
                 if (diff > 0) {
                     changeRow[col] = '+' + formatNumber(diff);
                 } else if (diff < 0) {
+                    // Use formatted number which already has the minus sign
                     changeRow[col] = formatNumber(diff);
                 } else {
                     changeRow[col] = '0';
@@ -164,12 +316,73 @@ export class SheetManager {
         return changes;
     }
     
-    getRowId(row) {
-        // Try different possible ID columns
-        const idColumns = ['governor_id', 'lord_id', 'player_id', 'id'];
+    // Determine the ID column in a list of headers
+    getIdColumn(headers) {
+        // Priority order for ID columns
+        const idColumns = ['governor_id', 'lord_id', 'player_id', 'id', 'Lord Id'];
+        
+        // Find the first matching column (case sensitive check)
         for (const col of idColumns) {
-            if (row[col]) return row[col];
+            if (headers.includes(col)) {
+                return col;
+            }
         }
+        
+        // If not found, try case-insensitive check
+        for (const col of idColumns) {
+            for (const header of headers) {
+                if (header.toLowerCase() === col.toLowerCase() || 
+                    header.toLowerCase().replace(/[_\s]/g, '') === col.toLowerCase().replace(/[_\s]/g, '')) {
+                    return header;
+                }
+            }
+        }
+        
+        // If no standard ID column found, try to find any column containing 'id'
+        for (const header of headers) {
+            if (header.toLowerCase().includes('id')) {
+                return header;
+            }
+        }
+        
+        // Fallback to first column if no ID column found
+        return headers[0];
+    }
+    
+    // Find the name column in a list of headers
+    getNameColumn(headers) {
+        // Priority order for name columns
+        const nameColumns = ['governor_name', 'lord_name', 'player_name', 'name', 'Lord Name'];
+        
+        // Find the first matching column (case sensitive check)
+        for (const col of nameColumns) {
+            if (headers.includes(col)) {
+                return col;
+            }
+        }
+        
+        // If not found, try case-insensitive check
+        for (const col of nameColumns) {
+            for (const header of headers) {
+                if (header.toLowerCase() === col.toLowerCase() || 
+                    header.toLowerCase().replace(/[_\s]/g, '') === col.toLowerCase().replace(/[_\s]/g, '')) {
+                    return header;
+                }
+            }
+        }
+        
+        // If no standard name column found, try to find any column containing 'name'
+        // but not containing 'alliance' or 'guild'
+        for (const header of headers) {
+            const lowerHeader = header.toLowerCase();
+            if (lowerHeader.includes('name') && 
+                !lowerHeader.includes('alliance') && 
+                !lowerHeader.includes('guild')) {
+                return header;
+            }
+        }
+        
+        // Return null if no name column found
         return null;
     }
     
@@ -346,15 +559,63 @@ export class SheetManager {
     }
     
     aggregateChanges() {
-        const aggregated = new Map();
-        
         // In changes view, we want to show all changes directly
         // without aggregating multiple periods
         for (const changeId of this.selectedChanges) {
             const changes = this.changesBetweenSheets.get(changeId);
             if (!changes) continue;
             
-            // Convert map to array directly
+            // Check if we have column mapping
+            if (appState.columnMapping && Object.keys(appState.columnMapping).length > 0) {
+                console.log('Using column mapping for aggregated changes');
+                
+                // Filter which columns to return based on mapping
+                const mappedColumns = Object.keys(appState.columnMapping);
+                console.log('Mapped columns:', mappedColumns);
+                
+                // Get the ID column 
+                const idColumn = this.getIdColumn(mappedColumns);
+                const nameColumn = this.getNameColumn(mappedColumns);
+                
+                // Convert map to array with mapped columns
+                const result = Array.from(changes.values()).map(row => {
+                    // Create new row with only mapped columns
+                    const mappedRow = {};
+                    
+                    // Copy ID and special flags
+                    mappedRow.is_change_row = row.is_change_row;
+                    
+                    // Always include the ID column if it exists
+                    if (idColumn && row[idColumn]) {
+                        mappedRow[idColumn] = row[idColumn];
+                    }
+                    
+                    // Always include name column if available
+                    if (nameColumn && row[nameColumn]) {
+                        mappedRow[nameColumn] = row[nameColumn];
+                    }
+                    
+                    // Copy mapped columns
+                    for (const col of mappedColumns) {
+                        // Skip ID and name columns (already handled)
+                        if (col === idColumn || col === nameColumn) continue;
+                        
+                        if (row[col] !== undefined) {
+                            mappedRow[col] = row[col];
+                        }
+                    }
+                    
+                    return mappedRow;
+                });
+                
+                // Filter out any rows that don't have the ID column
+                return result.filter(row => {
+                    if (!idColumn) return true;
+                    return row[idColumn] !== undefined;
+                });
+            }
+            
+            // If no mapping, just return all changes
             return Array.from(changes.values());
         }
         

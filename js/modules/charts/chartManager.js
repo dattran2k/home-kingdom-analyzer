@@ -1,6 +1,7 @@
 // Chart visualization module
 import { appState } from '../state.js';
 import { formatNumber } from '../ui.js';
+import { chartContainer } from './components/ConfigurableCharts/index.js';
 
 export class ChartManager {
     constructor() {
@@ -39,6 +40,13 @@ export class ChartManager {
     
     toggleChart() {
         const chartSection = document.getElementById('chartSection');
+        const configChartContainer = document.getElementById('configChartContainer');
+        
+        // Hide configurable charts if they're visible
+        if (configChartContainer && configChartContainer.style.display === 'block') {
+            chartContainer.hide();
+        }
+        
         if (chartSection.style.display === 'none') {
             chartSection.style.display = 'block';
             this.updateMetricOptions();
@@ -125,6 +133,9 @@ export class ChartManager {
         const leftMargin = 150;
         const rightMargin = 50;
         
+        // Draw x-axis with ticks
+        this.drawXAxis(ctx, leftMargin, chartHeight - 30, chartWidth, maxValue);
+        
         data.forEach((row, index) => {
             const y = index * (barHeight + spacing) + spacing;
             const value = values[index];
@@ -161,12 +172,12 @@ export class ChartManager {
             ctx.fillText(formatNumber(value), leftMargin + barWidth + 5, y + barHeight/2 + 4);
         });
         
-        // Draw axis
+        // Draw y axis
         ctx.strokeStyle = '#95a5a6';
         ctx.lineWidth = 1;
         ctx.beginPath();
         ctx.moveTo(leftMargin, 0);
-        ctx.lineTo(leftMargin, chartHeight);
+        ctx.lineTo(leftMargin, chartHeight - 30);
         ctx.stroke();
         
         // Add title
@@ -174,6 +185,131 @@ export class ChartManager {
         ctx.font = 'bold 14px Arial';
         ctx.textAlign = 'center';
         ctx.fillText(this.selectedMetric, canvas.width/2, chartHeight - 10);
+    }
+    
+    /**
+     * Draw X axis with ticks based on maximum value
+     * @param {CanvasRenderingContext2D} ctx - Canvas context
+     * @param {number} x - X coordinate to start
+     * @param {number} y - Y coordinate
+     * @param {number} width - Width of axis
+     * @param {number} maxValue - Maximum value
+     */
+    drawXAxis(ctx, x, y, width, maxValue) {
+        // Draw axis line
+        ctx.strokeStyle = '#95a5a6';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + width, y);
+        ctx.stroke();
+        
+        // Calculate nice rounded max value and ticks
+        const roundedMax = this.roundMaxValue(maxValue);
+        
+        // Calculate optimal number of ticks based on chart width
+        // For wider charts, show more ticks
+        const numTicks = Math.min(Math.max(Math.floor(width / 120), 4), 8);
+        const tickStep = roundedMax / numTicks;
+        
+        // Draw ticks
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#95a5a6';
+        ctx.font = '11px Arial';
+        
+        for (let i = 0; i <= numTicks; i++) {
+            const value = i * tickStep;
+            const xPos = x + (value / roundedMax) * width;
+            
+            // Draw tick line
+            ctx.beginPath();
+            ctx.moveTo(xPos, y);
+            ctx.lineTo(xPos, y + 5);
+            ctx.stroke();
+            
+            // Draw tick label
+            ctx.fillText(this.formatAxisValue(value), xPos, y + 18);
+        }
+    }
+    
+    /**
+     * Round max value to a nice number for axis display
+     * @param {number} value - Maximum value to round
+     * @returns {number} - Rounded max value
+     */
+    roundMaxValue(value) {
+        // Return 0 for invalid values
+        if (!value || value <= 0) return 0;
+        
+        // Calculate the magnitude (power of 10) of the value
+        const magnitude = Math.floor(Math.log10(value));
+        
+        // Calculate a nice base increment based on the magnitude
+        let baseIncrement;
+        
+        // Use different nice numbers based on the magnitude
+        if (magnitude <= 1) { // Values < 100
+            baseIncrement = Math.pow(10, magnitude) / 2;
+        } else if (magnitude <= 2) { // Values < 1,000
+            baseIncrement = Math.pow(10, magnitude) / 4;
+        } else if (magnitude <= 4) { // Values < 100,000
+            baseIncrement = Math.pow(10, magnitude - 1) * 2;
+        } else if (magnitude <= 6) { // Values < 10,000,000
+            baseIncrement = Math.pow(10, magnitude - 1) * 2;
+        } else if (magnitude <= 8) { // Values < 1,000,000,000
+            baseIncrement = Math.pow(10, magnitude - 1) * 2;
+        } else { // Values >= 1,000,000,000
+            baseIncrement = Math.pow(10, magnitude - 1) * 2;
+        }
+        
+        // Round up to the next nice number that's > value
+        return Math.ceil(value / baseIncrement) * baseIncrement;
+    }
+    
+    /**
+     * Format a value for axis display with appropriate units (K, M, B)
+     * @param {number} value - Value to format
+     * @returns {string} - Formatted value with unit
+     */
+    formatAxisValue(value) {
+        if (value === 0) return '0';
+        
+        // Get the magnitude (power of 10) to determine appropriate format
+        const magnitude = Math.abs(value) >= 1 ? Math.floor(Math.log10(Math.abs(value))) : 0;
+        
+        // For values less than 1000, show with appropriate precision
+        if (Math.abs(value) < 1000) {
+            // For small values (less than 10), show one decimal place
+            if (Math.abs(value) < 10) {
+                return value.toFixed(1);
+            }
+            return Math.round(value).toString();
+        }
+        
+        // For thousands (1K to 999K)
+        if (magnitude >= 3 && magnitude < 6) {
+            const rounded = Math.abs(value) / 1000;
+            // Format with decimal if needed for precision
+            return (value < 0 ? '-' : '') + 
+                (rounded < 10 ? rounded.toFixed(1) : Math.round(rounded)) + 'K';
+        }
+        
+        // For millions (1M to 999M)
+        if (magnitude >= 6 && magnitude < 9) {
+            const rounded = Math.abs(value) / 1000000;
+            return (value < 0 ? '-' : '') + 
+                (rounded < 10 ? rounded.toFixed(1) : Math.round(rounded)) + 'M';
+        }
+        
+        // For billions (1B+)
+        if (magnitude >= 9) {
+            const rounded = Math.abs(value) / 1000000000;
+            return (value < 0 ? '-' : '') + 
+                (rounded < 10 ? rounded.toFixed(1) : Math.round(rounded)) + 'B';
+        }
+        
+        // Fallback for any other cases
+        return value.toString();
     }
     
     getKingdomColor(kingdom) {
